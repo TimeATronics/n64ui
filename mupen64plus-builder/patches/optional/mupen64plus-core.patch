@@ -1,0 +1,136 @@
+diff --git a/src/api/api_export.ver b/src/api/api_export.ver
+index 289adf2..6dbe3e8 100644
+--- a/src/api/api_export.ver
++++ b/src/api/api_export.ver
+@@ -1,4 +1,5 @@
+ { global:
++g_analogSensitivity;
+ ConfigExternalGetParameter;
+ ConfigExternalOpen;
+ ConfigExternalClose;
+diff --git a/src/api/callbacks.c b/src/api/callbacks.c
+index 0a3c49b..183eead 100644
+--- a/src/api/callbacks.c
++++ b/src/api/callbacks.c
+@@ -31,6 +31,9 @@
+ #include "callbacks.h"
+ #include "m64p_types.h"
+ 
++/* Shared plugin variables (exported via api_export.ver) */
++__attribute__((visibility("default"))) int g_analogSensitivity = 0; /* 0=100%, 25/50/75=output % */
++
+ /* local variables */
+ static ptr_DebugCallback pDebugFunc = NULL;
+ static ptr_StateCallback pStateFunc = NULL;
+diff --git a/src/api/config.c b/src/api/config.c
+index cff288d..05d7797 100644
+--- a/src/api/config.c
++++ b/src/api/config.c
+@@ -529,6 +529,11 @@ m64p_error ConfigInit(const char *ConfigDirOverride, const char *DataDirOverride
+                 break;
+ 
+             case INI_SECTION:
++                if (l.name == NULL || strlen(l.name) < 1)
++                {
++                    current_section = NULL;
++                    break;
++                }
+                 rval = ConfigOpenSection(l.name, (m64p_handle *) &current_section);
+                 if (rval != M64ERR_SUCCESS)
+                 {
+@@ -833,8 +838,11 @@ EXPORT int CALL ConfigHasUnsavedChanges(const char *SectionName)
+         curr_section = l_ConfigListActive;
+         while (curr_section != NULL)
+         {
+-            if (ConfigHasUnsavedChanges(curr_section->name))
+-                return 1;
++            if (curr_section->name != NULL && strlen(curr_section->name) > 0)
++            {
++                if (ConfigHasUnsavedChanges(curr_section->name))
++                    return 1;
++            }
+             curr_section = curr_section->next;
+             iNumActiveSections++;
+         }
+diff --git a/src/api/frontend.c b/src/api/frontend.c
+index 956f96f..b3d3235 100644
+--- a/src/api/frontend.c
++++ b/src/api/frontend.c
+@@ -371,6 +371,13 @@ EXPORT m64p_error CALL CoreDoCommand(m64p_command Command, int ParamInt, void *P
+                 return M64ERR_INCOMPATIBLE;
+         case M64CMD_NETPLAY_CLOSE:
+             return netplay_stop();
++        case M64CMD_SET_ROM_FILENAME:
++            if (ParamPtr != NULL) {
++                strncpy(ROM_PARAMS.romfilename, (const char*)ParamPtr,
++                        sizeof(ROM_PARAMS.romfilename) - 1);
++                ROM_PARAMS.romfilename[sizeof(ROM_PARAMS.romfilename) - 1] = '\0';
++            }
++            return M64ERR_SUCCESS;
+         default:
+             return M64ERR_INPUT_INVALID;
+     }
+diff --git a/src/api/m64p_types.h b/src/api/m64p_types.h
+index 088f011..daa9d63 100644
+--- a/src/api/m64p_types.h
++++ b/src/api/m64p_types.h
+@@ -171,7 +171,8 @@ typedef enum {
+   M64CMD_PIF_OPEN,
+   M64CMD_ROM_SET_SETTINGS,
+   M64CMD_DISK_OPEN,
+-  M64CMD_DISK_CLOSE
++  M64CMD_DISK_CLOSE,
++  M64CMD_SET_ROM_FILENAME
+ } m64p_command;
+ 
+ typedef struct {
+diff --git a/src/main/main.c b/src/main/main.c
+index e317570..1b67f7c 100644
+--- a/src/main/main.c
++++ b/src/main/main.c
+@@ -168,6 +168,12 @@ static char *get_save_filename(void)
+ 
+     if (format == 0) {
+         snprintf(filename, 256, "%s", ROM_PARAMS.headername);
++    } else if (format == 2) {
++        /* Use ROM filename set by frontend (without path or extension) */
++        if (ROM_PARAMS.romfilename[0] != '\0')
++            snprintf(filename, 256, "%s", ROM_PARAMS.romfilename);
++        else
++            snprintf(filename, 256, "%s", ROM_PARAMS.headername); /* fallback */
+     } else /* if (format == 1) */ {
+         if (strstr(ROM_SETTINGS.goodname, "(unknown rom)") == NULL) {
+             snprintf(filename, 256, "%.32s-%.8s", ROM_SETTINGS.goodname, ROM_SETTINGS.MD5);
+@@ -438,7 +444,7 @@ int main_set_core_defaults(void)
+     ConfigSetDefaultInt(g_CoreConfig, "SiDmaDuration", -1, "Duration of SI DMA (-1: use per game settings)");
+     ConfigSetDefaultString(g_CoreConfig, "GbCameraVideoCaptureBackend1", DEFAULT_VIDEO_CAPTURE_BACKEND, "Gameboy Camera Video Capture backend");
+     ConfigSetDefaultInt(g_CoreConfig, "SaveDiskFormat", 1, "Disk Save Format (0: Full Disk Copy (*.ndr/*.d6r), 1: RAM Area Only (*.ram))");
+-    ConfigSetDefaultInt(g_CoreConfig, "SaveFilenameFormat", 1, "Save (SRAM/State) Filename Format (0: ROM Header Name, 1: Automatic (including partial MD5 hash))");
++    ConfigSetDefaultInt(g_CoreConfig, "SaveFilenameFormat", 1, "Save (SRAM/State) Filename Format (0: ROM Header Name, 1: Automatic (including partial MD5 hash), 2: ROM filename from frontend)");
+ 
+     /* handle upgrades */
+     if (bUpgrade)
+diff --git a/src/main/rom.c b/src/main/rom.c
+index 325c5b6..e450c4f 100644
+--- a/src/main/rom.c
++++ b/src/main/rom.c
+@@ -177,6 +177,7 @@ m64p_error open_rom(const unsigned char* romimage, unsigned int size)
+     memcpy(ROM_PARAMS.headername, ROM_HEADER.Name, 20);
+     ROM_PARAMS.headername[20] = '\0';
+     trim(ROM_PARAMS.headername); /* Remove trailing whitespace from ROM name. */
++    memset(ROM_PARAMS.romfilename, 0, sizeof(ROM_PARAMS.romfilename));
+ 
+     /* Look up this ROM in the .ini file and fill in goodname, etc */
+     if ((entry=ini_search_by_md5(digest)) != NULL ||
+diff --git a/src/main/rom.h b/src/main/rom.h
+index 853fd3b..4484e0d 100644
+--- a/src/main/rom.h
++++ b/src/main/rom.h
+@@ -51,6 +51,7 @@ typedef struct _rom_params
+    char *cheats;
+    m64p_system_type systemtype;
+    char headername[21];  /* ROM Name as in the header, removing trailing whitespace */
++   char romfilename[256]; /* ROM filename without path or extension, set by frontend */
+ } rom_params;
+ 
+ extern m64p_rom_header   ROM_HEADER;

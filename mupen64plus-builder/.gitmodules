@@ -1,0 +1,21 @@
+[submodule "src/mupen64plus-core"]
+	path = src/mupen64plus-core
+	url = https://github.com/mupen64plus/mupen64plus-core
+[submodule "src/mupen64plus-ui-console"]
+	path = src/mupen64plus-ui-console
+	url = https://github.com/mupen64plus/mupen64plus-ui-console
+[submodule "src/mupen64plus-audio-sdl"]
+	path = src/mupen64plus-audio-sdl
+	url = https://github.com/mupen64plus/mupen64plus-audio-sdl
+[submodule "src/mupen64plus-input-sdl"]
+	path = src/mupen64plus-input-sdl
+	url = https://github.com/mupen64plus/mupen64plus-input-sdl
+[submodule "src/mupen64plus-rsp-hle"]
+	path = src/mupen64plus-rsp-hle
+	url = https://github.com/mupen64plus/mupen64plus-rsp-hle
+[submodule "src/mupen64plus-video-glide64mk2"]
+	path = src/mupen64plus-video-glide64mk2
+	url = https://github.com/mupen64plus/mupen64plus-video-glide64mk2
+[submodule "src/mupen64plus-video-rice"]
+	path = src/mupen64plus-video-rice
+	url = https://github.com/mupen64plus/mupen64plus-video-rice

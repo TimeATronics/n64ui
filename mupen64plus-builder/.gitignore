@@ -1,0 +1,13 @@
+# toolchain archive (user drops it here, see toolchain/README.md)
+toolchain/*.tar.gz
+toolchain/*.tgz
+
+# downloaded sysroot archives
+sysroot/cache/
+
+# build output
+dist/
+
+# misc
+*.o
+*.log

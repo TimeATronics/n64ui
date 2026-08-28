@@ -1,0 +1,7 @@
+# build context
+.git
+src/
+dist/
+patches/
+*.md
+.DS_Store

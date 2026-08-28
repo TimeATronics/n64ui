@@ -1,0 +1,16 @@
+# Build artifacts
+dist/
+
+# Sample ROM
+*.z64
+*.v64
+*.n64
+
+# Runtime config/data
+*.cfg
+data/
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store

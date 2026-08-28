@@ -1,0 +1,184 @@
+diff --git a/src/plugin.c b/src/plugin.c
+index 974b1db..edaa2c3 100644
+--- a/src/plugin.c
++++ b/src/plugin.c
+@@ -27,6 +27,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <math.h>
++#include <sys/stat.h>
+ 
+ #define M64P_PLUGIN_PROTOTYPES 1
+ #include "config.h"
+@@ -57,6 +58,10 @@
+ #define test_bit(bit, array)    ((array[LONG(bit)] >> OFF(bit)) & 1)
+ #endif //__linux__
+ 
++/* Analog sensitivity modifier (0=100%, 25/50/75=output %).
++ * Defined in mupen64plus (ui-console main.c); written by overlay. */
++extern int g_analogSensitivity;
++
+ /* definitions of pointers to Core config functions */
+ ptr_ConfigOpenSection      ConfigOpenSection = NULL;
+ ptr_ConfigDeleteSection    ConfigDeleteSection = NULL;
+@@ -510,6 +515,10 @@ EXPORT void CALL GetKeys( int Control, BUTTONS *Keys )
+     if (myKeyState[SDL_SCANCODE_RSHIFT])
+         axis_max_val -= 25;
+ 
++    // Analog sensitivity modifier from overlay shortcut
++    if (g_analogSensitivity > 0)
++        axis_max_val = axis_max_val * g_analogSensitivity / 100;
++
+     for ( b = 0; b < 4; ++b )
+     {
+         if (controller[b].device >= 0)
+@@ -614,6 +623,149 @@ EXPORT void CALL GetKeys( int Control, BUTTONS *Keys )
+         controller[Control].buttons.Y_AXIS = iY;
+     }
+ 
++    /* Brick-only C-button remap. The Brick has no right analog stick, so
++     * R2 (axis 5) + ABXY sends C-buttons by physical position:
++     *   A (right) → C-Right, B (bottom) → C-Down,
++     *   X (top) → C-Up, Y (left) → C-Left.
++     *
++     * D-pad↔joystick remapping is handled by trimui_inputd at the kernel
++     * input layer (flag files in /tmp/trimui_inputd/), not here. */
++    {
++        static int is_brick = -1;
++        if (is_brick < 0) {
++            const char* d = getenv("DEVICE");
++            is_brick = (d && strcmp(d, "brick") == 0) ? 1 : 0;
++        }
++      if (is_brick) {
++        SDL_Joystick *joy = controller[Control].joystick;
++        if (joy && Control == 0) {
++            /* R2 modifier (axis 5 > 0): remap ABXY to C-buttons by position */
++            if (SDL_JoystickGetAxis(joy, 5) > 0) {
++                if (SDL_JoystickGetButton(joy, 1)) { /* A (right) → C-Right */
++                    controller[Control].buttons.Value &= ~0x0080; /* clear A_BUTTON */
++                    controller[Control].buttons.Value |=  0x0100; /* set R_CBUTTON */
++                }
++                if (SDL_JoystickGetButton(joy, 0)) { /* B (bottom) → C-Down */
++                    controller[Control].buttons.Value &= ~0x0040; /* clear B_BUTTON */
++                    controller[Control].buttons.Value |=  0x0400; /* set D_CBUTTON */
++                }
++                if (SDL_JoystickGetButton(joy, 3)) { /* X (top) → C-Up */
++                    controller[Control].buttons.Value &= ~0x0200; /* clear C-Left from config */
++                    controller[Control].buttons.Value |=  0x0800; /* set U_CBUTTON */
++                }
++                if (SDL_JoystickGetButton(joy, 2)) { /* Y (left) → C-Left */
++                    controller[Control].buttons.Value &= ~0x0400; /* clear C-Down from config */
++                    controller[Control].buttons.Value |=  0x0200; /* set L_CBUTTON */
++                }
++            }
++        }
++      }
++    }
++
++    /* Runtime button remapping from $EMU_BUTTON_MAP_FILE. The overlay writes
++     * this file whenever the user changes a binding; we stat() it each frame
++     * and re-parse only when the mtime changes. Each line is:
++     *   <n64_bit_hex> <type> <id> [<dir>] [<mod_type> <mod_id>]
++     * where type is 'b' (button) or 'a' (axis), id is the SDL index,
++     * dir is +1/-1 for axes, and mod fields describe the modifier key. */
++    {
++        /* N64 button bits used in controller.buttons.Value */
++        #define N64_A      0x0080
++        #define N64_B      0x0040
++        #define N64_START  0x0010
++        #define N64_Z      0x0020
++        #define N64_L      0x2000
++        #define N64_R      0x1000
++        #define N64_CU     0x0800
++        #define N64_CD     0x0400
++        #define N64_CL     0x0200
++        #define N64_CR     0x0100
++        #define MAX_REMAPS 16
++
++        typedef struct {
++            unsigned int n64_bit;
++            int is_axis;    /* 0 = button, 1 = axis */
++            int id;         /* SDL button or axis index */
++            int axis_dir;   /* +1 or -1 for axes */
++            int mod_type;   /* 0 = none, 1 = button modifier */
++            int mod_id;     /* SDL button index for modifier */
++        } ButtonRemap;
++
++        static ButtonRemap remaps[MAX_REMAPS];
++        static int remap_count = 0;
++        static time_t remap_mtime = 0;
++        static const char* remap_path = NULL;
++        static int remap_path_checked = 0;
++
++        if (!remap_path_checked) {
++            remap_path = getenv("EMU_BUTTON_MAP_FILE");
++            remap_path_checked = 1;
++        }
++
++        if (remap_path && remap_path[0] != '\0') {
++            struct stat st;
++            if (stat(remap_path, &st) == 0 && st.st_mtime != remap_mtime) {
++                remap_mtime = st.st_mtime;
++                remap_count = 0;
++                FILE* f = fopen(remap_path, "r");
++                if (f) {
++                    char line[256];
++                    while (fgets(line, sizeof(line), f) && remap_count < MAX_REMAPS) {
++                        ButtonRemap* r = &remaps[remap_count];
++                        unsigned int bit;
++                        char type;
++                        int id, dir = 0, mt = 0, mid = -1;
++                        int n = sscanf(line, "%x %c %d %d %d %d",
++                                       &bit, &type, &id, &dir, &mt, &mid);
++                        if (n >= 3) {
++                            r->n64_bit = bit;
++                            r->is_axis = (type == 'a') ? 1 : 0;
++                            r->id = id;
++                            r->axis_dir = dir;
++                            r->mod_type = mt;
++                            r->mod_id = mid;
++                            remap_count++;
++                        }
++                    }
++                    fclose(f);
++                }
++            }
++
++            SDL_Joystick *joy = controller[Control].joystick;
++            if (joy && Control == 0 && remap_count > 0) {
++                /* Clear all remapped N64 bits first, then set based on physical state */
++                unsigned int remap_mask = 0;
++                for (int i = 0; i < remap_count; i++)
++                    remap_mask |= remaps[i].n64_bit;
++                controller[Control].buttons.Value &= ~remap_mask;
++
++                for (int i = 0; i < remap_count; i++) {
++                    ButtonRemap* r = &remaps[i];
++                    int pressed = 0;
++                    if (r->is_axis) {
++                        int val = SDL_JoystickGetAxis(joy, r->id);
++                        pressed = (r->axis_dir > 0) ? (val > 24000) : (val < -24000);
++                    } else {
++                        pressed = SDL_JoystickGetButton(joy, r->id);
++                    }
++                    /* Check modifier if required */
++                    if (r->mod_type == 1 && r->mod_id >= 0) {
++                        /* Button modifier (MENU, SELECT) */
++                        if (!SDL_JoystickGetButton(joy, r->mod_id))
++                            pressed = 0;
++                    } else if (r->mod_type == 2 && r->mod_id >= 0) {
++                        /* Axis modifier (L2, R2) — held when past threshold */
++                        int mod_val = SDL_JoystickGetAxis(joy, r->mod_id);
++                        if (mod_val < 24000 && mod_val > -24000)
++                            pressed = 0;
++                    }
++                    if (pressed)
++                        controller[Control].buttons.Value |= r->n64_bit;
++                }
++            }
++        }
++    }
++
+     // process mouse events
+     mstate = SDL_GetMouseState( NULL, NULL );
+     for( b = 0; b < 16; b++ )
