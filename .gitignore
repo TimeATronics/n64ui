@@ -1,0 +1,36 @@
+# Build artifacts
+gui/dist/
+mupen64plus-builder/dist/
+
+# Sample ROMs
+*.z64
+*.v64
+*.n64
+
+# Runtime config/data
+*.cfg
+gui/data/
+
+# Reference checkouts (separate repos)
+refs/
+
+# Toolchain / SDK downloads
+toolchain/
+sysroot/
+gcc_16_sysroot_for_wsl/
+mupen64plus-builder/toolchain/
+mupen64plus-builder/sysroot/
+
+# mupen64plus-builder submodule clones (each has its own .git)
+mupen64plus-builder/src/
+
+# Scratch / staging leftovers
+mupen64_build/
+staging_gliden64/
+old-audio-sdl.so
+NOTES.md
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
