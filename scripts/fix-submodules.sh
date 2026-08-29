@@ -16,43 +16,53 @@ URLS[rsp-hle]="https://github.com/mupen64plus/mupen64plus-rsp-hle"
 URLS[glide64mk2]="https://github.com/mupen64plus/mupen64plus-video-glide64mk2"
 URLS[rice]="https://github.com/mupen64plus/mupen64plus-video-rice"
 
-for comp in core ui-console audio-sdl input-sdl rsp-hle glide64mk2 rice; do
-  dir="mupen64plus-builder/src/mupen64plus-$comp"
+# directory name -> comp name (for the URL map)
+declare -A COMP
+COMP[mupen64plus-core]=core
+COMP[mupen64plus-ui-console]=ui-console
+COMP[mupen64plus-audio-sdl]=audio-sdl
+COMP[mupen64plus-input-sdl]=input-sdl
+COMP[mupen64plus-rsp-hle]=rsp-hle
+COMP[mupen64plus-video-glide64mk2]=glide64mk2
+COMP[mupen64plus-video-rice]=rice
+
+for dir in "${!COMP[@]}"; do
+  comp=${COMP[$dir]}
+  dir="mupen64plus-builder/src/$dir"
   echo "== $dir =="
-  # Remove the dangling .git pointer FILE (it references the deleted
-  # builder .git/modules and is unresolvable); content is untouched.
+  # Remove the dangling .git pointer FILE if present (it references the
+  # deleted builder .git/modules and is unresolvable); content untouched.
   if [ -f "$dir/.git" ]; then
     echo "  removing dangling .git pointer"
     rm -f "$dir/.git"
   fi
-  if ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
-    echo "  init"
-    git -C "$dir" init -q -b main
-  fi
-  # move the worktree files into the index (preserves content, one snapshot)
-  ( cd "$dir" && git rm -rq --cached . 2>/dev/null || true
-    git add -A
-    git -c user.name=brick -c user.email=brick@local commit -qm "snapshot for TrimUI Brick toolchain"
+  # Always init: git init in a subdir of the root repo creates a nested repo
+  # (never skip via rev-parse - it resolves the parent repo).
+  echo "  init"
+  ( cd "$dir" && git init -q -b main )
+  ( cd "$dir"
+    git add -A .
+    git -c user.name=brick -c user.email=brick@local commit -qm "snapshot for TrimUI Brick toolchain" \
+      || echo "  (no new content)"
     git remote remove origin 2>/dev/null || true
     git remote add origin "${URLS[$comp]}"
   )
 done
 
 # Register all as submodules of the ROOT repo.
-ROOT=$(pwd)
 : > .gitmodules
-for comp in core ui-console audio-sdl input-sdl rsp-hle glide64mk2 rice; do
+for name in "${!COMP[@]}"; do
   cat >> .gitmodules <<EOF
-[submodule "mupen64plus-builder/src/mupen64plus-$comp"]
-	path = mupen64plus-builder/src/mupen64plus-$comp
-	url = ${URLS[$comp]}
+[submodule "mupen64plus-builder/src/$name"]
+	path = mupen64plus-builder/src/$name
+	url = ${URLS[${COMP[$name]}]}
 EOF
 done
 
 git add .gitmodules
-for comp in core ui-console audio-sdl input-sdl rsp-hle glide64mk2 rice; do
-  git add "mupen64plus-builder/src/mupen64plus-$comp"
+for name in "${!COMP[@]}"; do
+  git add "mupen64plus-builder/src/$name"
 done
 
-echo "== done. git status:"
-git status --short | head -15
+echo "== done. root status:"
+git status --short | head -20
