@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build + push the toolchain image to a registry (docker.io or ghcr.io).
+# Build + push the toolchain image to a registry (docker.io).
 # Must be logged in first: docker login
 set -euo pipefail
 cd "$(dirname "$0")/.."

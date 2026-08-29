@@ -4,8 +4,7 @@
 #
 # Image resolution:
 #   1. use the local image if it exists
-#   2. else build it from source (requires toolchain/*.tar.gz)
-#   3. else pull the published image from the registry
+#   2. else pull the published image from the registry
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,9 +15,6 @@ git submodule update --init --recursive
 
 if docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "using local image: $IMAGE"
-elif [ -f toolchain/gcc16-aarch64-linux-gnu-cross.tar.gz ]; then
-  echo "image not local, building from source"
-  bash scripts/build-image.sh "$IMAGE"
 else
   echo "image not local, pulling: $REGISTRY_IMAGE"
   docker pull "$REGISTRY_IMAGE"
@@ -29,6 +25,7 @@ mkdir -p dist
 docker run --rm \
   -v "$PWD/src":/build/src \
   -v "$PWD/patches":/build/patches:ro \
+  -v "$PWD/docker/build-all.sh":/opt/build-all.sh:ro \
   -v "$PWD/dist":/build/dist \
   "$IMAGE" /opt/build-all.sh
 

@@ -172,6 +172,7 @@ int main(int argc, char** argv) {
     // N64UI_AUTOTEST: act on the swap-path's menu requests.
     if (app.autoRequest == 1) {
       if (emuOk) emu->vidext().setMenuVisible(true);
+      if (emuOk) emu->setMute(true);
       push(app, new n64ui::GameMenu(*emu, *input));
       input->resync();
       app.autoRequest = 0;
@@ -180,6 +181,7 @@ int main(int argc, char** argv) {
       pop(app);
       input->resync();
       if (emuOk) emu->vidext().setMenuVisible(false);
+      if (emuOk) emu->setMute(false);
       app.autoRequest = 0;
       LOG_INFO("autotest: menu closed");
     } else if (app.autoRequest == 3) {
@@ -202,6 +204,11 @@ int main(int argc, char** argv) {
       if (a.type == n64ui::ActionType::Menu && !romArg.empty() &&
           app.stack.empty()) {
         if (emuOk) emu->vidext().setMenuVisible(true);
+        // Mute for the whole menu-open period: the repaint frames (menu
+        // navigation) run on the emulation thread asynchronously, so a
+        // per-frame mute/unmute races the frame and blips audio. The game is
+        // paused while the menu is open, so nothing audible is lost.
+        if (emuOk) emu->setMute(true);
         // onShow -> pause; drawn by the swap path once at pause entry.
         push(app, new n64ui::GameMenu(*emu, *input));
         if (emuOk) emu->vidext().menuChanged();
@@ -224,6 +231,7 @@ int main(int argc, char** argv) {
           // popped). Sub-menu pops keep the menu open and visible.
           if (!romArg.empty() && app.stack.empty()) {
             if (emuOk) emu->vidext().setMenuVisible(false);
+            if (emuOk) emu->setMute(false);
           } else if (romArg.empty() && app.stack.empty()) {
             app.running = false;
           }
@@ -264,7 +272,8 @@ int main(int argc, char** argv) {
     // While the in-game menu is open, repaint it by advancing one frame on
     // the emulation thread: the paused core runs one frame (which the opaque
     // menu hides), the swap path repaints the menu, and the core re-pauses
-    // automatically. No context handoffs between threads.
+    // automatically. No context handoffs between threads. Audio stays muted
+    // for the whole menu-open period (see the menu-open handler above).
     if (!romArg.empty() && !app.stack.empty() && uiChanged && emuOk) {
       emu->frameAdvance();
     }

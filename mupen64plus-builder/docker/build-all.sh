@@ -31,15 +31,23 @@ COMMON=(
 
 log() { echo "== $* =="; }
 
-# Optional patches: patches/<component>.patch applied to src/<component>
+# Optional patches: patches/<component>.patch applied to src/<component>.
+# Idempotent: skips a patch whose effect is already in the worktree (the
+# rice patch may have been applied by an earlier run on this checkout).
 apply_patches() {
   [ -d "$PAT" ] || return 0
   for p in "$PAT"/*.patch; do
     [ -f "$p" ] || continue
     local comp
     comp=$(basename "$p" .patch)
-    log "applying $(basename "$p") -> $comp"
-    ( cd "$SRC/$comp" && git apply "$p" ) || { echo "patch failed: $p"; return 1; }
+    if ( cd "$SRC/$comp" && git apply --check "$p" ); then
+      log "applying $(basename "$p") -> $comp"
+      ( cd "$SRC/$comp" && git apply "$p" ) || { echo "patch failed: $p"; return 1; }
+    elif ( cd "$SRC/$comp" && git apply --reverse --check "$p" ); then
+      log "already applied: $(basename "$p") -> $comp"
+    else
+      echo "patch failed: $p (neither applies cleanly nor reverses)"; return 1
+    fi
   done
 }
 
@@ -85,6 +93,7 @@ build mupen64plus-video-glide64mk2 mupen64plus-video-glide64mk2.so \
 build mupen64plus-video-rice mupen64plus-video-rice.so \
   USE_GLES=1 \
   ZLIB_CFLAGS="$INC" ZLIB_LDLIBS="-L$SR/usr/lib -lz" \
+  LIBPNG_CFLAGS="$INC/libpng12" LIBPNG_LDLIBS="-L$SR/usr/lib -lpng12" \
   GL_CFLAGS="$INC" GL_LDLIBS="-L$SR/usr/lib -lGLESv2" \
   SDL_LDLIBS="-L$SR/usr/lib -lSDL2 -Wl,-rpath-link,$SR/usr/lib"
 

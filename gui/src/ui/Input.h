@@ -58,11 +58,15 @@ class Input {
   // emulated controller.
   virtual void waitForRelease(int timeoutMs) = 0;
 
-  // Non-blocking raw-input capture poll: checks the SDL event queue once for
-  // a key press / joystick button / hat / axis and returns the input-sdl
-  // binding string ("key(4)", "button(1)", "hat(0 Up)", "axis(0+)") in out.
-  // Returns true when an input was captured. Escape cancels (returns false
-  // with out empty).
+  // Non-blocking raw-input capture poll: checks the joystick/keyboard STATE
+  // (not the event queue — the input-sdl plugin's SDL pump races us for
+  // events) for a key press / joystick button / hat / axis and returns the
+  // input-sdl binding string ("key(4)", "button(1)", "hat(0 Up)", "axis(0+)")
+  // in out. Returns true when an input was captured. Escape cancels (returns
+  // false with out empty). beginCapture() arms it: it first waits until all
+  // inputs are released so the triggering press (the A key used to enter
+  // capture) doesn't map itself.
+  virtual void beginCapture() = 0;
   virtual bool capturePoll(std::string& out) = 0;
 
   static Input* create();

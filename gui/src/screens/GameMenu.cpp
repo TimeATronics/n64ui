@@ -82,7 +82,7 @@ GameMenu::GameMenu(Emulator& e, Input& input) : MenuScreen(e), m_input(&input) {
       [this] { return strFormat("%d%%", emu().speedFactor()); });
   add("Video", [this] { return screenPush(new VideoMenu(emu())); });
   add("Audio", [this] { return screenPush(new AudioMenu(emu())); });
-  add("Input", [this] { return screenPush(new InputMappingMenu(emu())); });
+  add("Input", [this] { return screenPush(new InputMappingMenu(emu(), *m_input)); });
   add("Save Settings", [this] { return screenPush(new SaveSettingsMenu(emu())); });
   add("Exit", [this] {
     emu().stop();
