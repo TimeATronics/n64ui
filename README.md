@@ -23,7 +23,7 @@ plugins.
 ## Installation
 
 1. Download `release.tar.gz` from the
-   [Releases](https://github.com/your-account/n64ui/releases) page.
+   [Releases](https://github.com/TimeATronics/n64ui/releases) page.
 2. Extract it into the SD card's `Emus` folder:
 
    ```
