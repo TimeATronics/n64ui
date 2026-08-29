@@ -270,7 +270,7 @@ class HostVidExt : public VidExt {
     if (v.m_menu && v.m_win) {
       if (v.m_renderer) {
         // Direct menu draw (the core is paused, so this runs at pause entry
-        // and on frame-advance repaints only — no per-frame cost).
+        // and on frame-advance repaints only -- no per-frame cost).
         v.m_renderer->resize(v.m_width, v.m_height);
         v.m_renderer->beginFrame(true);
         if (v.m_drawer) v.m_drawer(*v.m_renderer);

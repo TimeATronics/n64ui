@@ -59,7 +59,7 @@ class Input {
   virtual void waitForRelease(int timeoutMs) = 0;
 
   // Non-blocking raw-input capture poll: checks the joystick/keyboard STATE
-  // (not the event queue — the input-sdl plugin's SDL pump races us for
+  // (not the event queue -- the input-sdl plugin's SDL pump races us for
   // events) for a key press / joystick button / hat / axis and returns the
   // input-sdl binding string ("key(4)", "button(1)", "hat(0 Up)", "axis(0+)")
   // in out. Returns true when an input was captured. Escape cancels (returns

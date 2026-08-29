@@ -15,7 +15,7 @@ plugins.
   each), reset, speed, video/audio settings, input mapping
 - **glide64mk2** (default) and **Rice** video plugins, both accelerated
   (GLES)
-- **Analog control via the D-Pad** (F1 toggles D-Pad → analog at the
+- **Analog control via the D-Pad** (F1 toggles D-Pad -> analog at the
   hardware level; the menu's analog entries auto-pair both directions)
 - Per-game settings stored by ROM
 - Muted, glitch-free pause on both the Brick and desktop
@@ -34,8 +34,8 @@ plugins.
    configs and the `n64ui-test/` payload.
 
 3. In the TrimUI launcher, open **N64** and pick:
-   - **N64UI (glide64mk2)** — default plugin
-   - **N64UI (Rice)** — Rice plugin
+   - **N64UI (glide64mk2)** -- default plugin
+   - **N64UI (Rice)** -- Rice plugin
 
 ## Usage
 
@@ -47,7 +47,7 @@ plugins.
 | B             | back                          |
 
 The game pauses whenever the menu is open. Save/Load pick from 10 slots;
-input mapping is under **Menu → Input** (L2/R2 map to trigger axes, F1
+input mapping is under **Menu -> Input** (L2/R2 map to trigger axes, F1
 converts the D-Pad to analog for the stick entries).
 
 ## Building from source

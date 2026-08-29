@@ -257,7 +257,7 @@ class RendererImpl : public Renderer {
       glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &m_savedArrayBuf);
       glGetIntegerv(GL_SCISSOR_BOX, m_savedScissorBox);
       glGetIntegerv(GL_FRAMEBUFFER_BINDING, &m_savedFbo);
-      // Note: we don't bind framebuffer 0 here — the caller decides the draw
+      // Note: we don't bind framebuffer 0 here -- the caller decides the draw
       // target (default framebuffer for the menu blit, the menu FBO for the
       // cached render). We only save/restore the binding.
       // Save the vertex-attribute array state (the plugin may cache which
