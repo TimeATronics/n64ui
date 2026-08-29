@@ -6,6 +6,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <dlfcn.h>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -98,6 +100,12 @@ class EmulatorImpl : public Emulator {
       return false;
     }
 
+    // Snapshot the GLOBAL values of every per-game key exactly as loaded
+    // from the file (before any per-game overrides apply). "Save for this
+    // Game" reverts the global sections to these, so the settings only
+    // affect the saved ROM and other games keep their own.
+    snapshotGlobalDefaults();
+
     // Route all core data (savestates, SRAM, mempaks, screenshots) into OUR
     // data dir: ConfigOverrideUserPaths makes ConfigGetUserDataPath() return
     // it (the core's defaults otherwise use the XDG path), and setting the
@@ -166,26 +174,28 @@ class EmulatorImpl : public Emulator {
       }
     }
 
-    if (!m_plugins->loadAll(cfg.pluginDir)) return false;
-    // Plugins are started now but attached after ROM_OPEN (core 2.6.0
-    // CoreAttachPlugin requires a ROM to be open first).
-    if (m_plugins->startupAll(*m_core, m_core->handle()) != M64ERR_SUCCESS)
-      return false;
-
-    // Brick first-run input config: the input plugin's default is keyboard;
-    // give port 1 the Brick's built-in joystick ("TRIMUI Player1", hat 0,
-    // buttons A=1 B=0 X=3 Y=2 L1=4 R1=5 Select=6 Start=7). The dpad drives
-    // both the N64 dpad and the analog stick. Applied only when the plugin's
-    // default (keyboard, device -1) is still in place so user remaps stick.
+    // Brick input config: force MANUAL mode (0). Mode 2 (fully automatic)
+    // makes the plugin copy the "Xbox 360 Controller" auto-config from
+    // InputAutoCfg.ini over our bindings at every plugin start, reverting
+    // user mappings on the next launch. We manage the bindings ourselves.
+    // This must happen BEFORE the plugins start (the plugin reads the config
+    // once at PluginStart). First-run defaults are applied only when the
+    // controller is still unconfigured (device -1) so user remaps stick.
     if (Platform::isDevice()) {
       m64p_handle inp = nullptr;
-      int dev = -2;
       if (m_config->openSection("Input-SDL-Control1", &inp) == M64ERR_SUCCESS) {
-        if (m_config->getInt(inp, "device", &dev) != M64ERR_SUCCESS ||
-            dev == -1) {
+        int dev = -2;
+        bool fresh = m_config->getInt(inp, "device", &dev) != M64ERR_SUCCESS ||
+                     dev == -1;
+        bool changed = false;
+        int mode = -1;
+        if (m_config->getInt(inp, "mode", &mode) != M64ERR_SUCCESS || mode != 0) {
+          m_config->setInt(inp, "mode", 0);
+          changed = true;
+        }
+        if (fresh) {
           m_config->setInt(inp, "plugged", 1);
           m_config->setInt(inp, "device", 0);
-          m_config->setInt(inp, "mode", 2);
           m_config->setInt(inp, "mouse", 0);
           m_config->setString(inp, "DPad U", "hat(0 Up)");
           m_config->setString(inp, "DPad D", "hat(0 Down)");
@@ -194,19 +204,44 @@ class EmulatorImpl : public Emulator {
           m_config->setString(inp, "A Button", "button(1)");
           m_config->setString(inp, "B Button", "button(0)");
           m_config->setString(inp, "Start", "button(7)");
-          m_config->setString(inp, "Z Trig", "button(4)");
-          m_config->setString(inp, "L Trig", "button(6)");
+          m_config->setString(inp, "Z Trig", "axis(2+,24000)");
+          m_config->setString(inp, "C Button R", "axis(5+,24000)");
+          m_config->setString(inp, "L Trig", "button(4)");
           m_config->setString(inp, "R Trig", "button(5)");
-          m_config->setString(inp, "X Axis", "hat(0 Left Right)");
-          m_config->setString(inp, "Y Axis", "hat(0 Up Down)");
+          m_config->setString(inp, "X Axis", "axis(0-,0+)");
+          m_config->setString(inp, "Y Axis", "axis(1-,1+)");
           m_config->setString(inp, "AnalogDeadzone", "4096,4096");
-          m_config->saveFile();
+          changed = true;
           LOG_INFO("wrote Brick joystick input config (Input-SDL-Control1)");
         }
+        if (changed) m_config->saveFile();
       }
     }
 
+    if (!m_plugins->loadAll(cfg.pluginDir)) return false;
+    // Plugins are started now but attached after ROM_OPEN (core 2.6.0
+    // CoreAttachPlugin requires a ROM to be open first).
+    if (m_plugins->startupAll(*m_core, m_core->handle()) != M64ERR_SUCCESS)
+      return false;
+
     LOG_INFO("emulator initialized (core api 0x%06X)", (unsigned)kCoreApiVersion);
+    // Debug: what config file does the core use, and what did it load?
+    /*
+    {
+      typedef const char* (*FnGetCfgPath)(void);
+      FnGetCfgPath getPath =
+          (FnGetCfgPath)dlsym(RTLD_DEFAULT, "ConfigGetUserConfigPath");
+      LOG_INFO("config path: %s", getPath ? getPath() : "?");
+      m64p_handle sec = nullptr;
+      if (m_config->openSection("Input-SDL-Control1", &sec) == M64ERR_SUCCESS) {
+        char buf[256] = {0};
+        int len = sizeof(buf);
+        m64p_error e =
+            m_config->getString(sec, "C Button U", buf, &len);
+        LOG_INFO("config probe: C Button U (get=%d) = '%s'", (int)e, buf);
+      }
+    }
+    */
     return true;
   }
 
@@ -407,21 +442,85 @@ class EmulatorImpl : public Emulator {
 
   std::string romMd5() const override { return m_romMd5; }
 
+  // The global values of every per-game key, read at startup (before any
+  // per-game overrides). Used to keep other games untouched when the user
+  // saves settings for one game only.
+  std::map<std::string, int> m_globalInt;
+  std::map<std::string, std::string> m_globalStr;
+
+  void snapshotGlobalDefaults() {
+    for (const PerGameKey* kp = kPerGameKeys; kp->key; ++kp) {
+      m64p_handle sec = nullptr;
+      int v = 0;
+      std::string id = std::string(kp->section) + "|" + kp->key;
+      if (m_config->openSection(kp->section, &sec) == M64ERR_SUCCESS &&
+          m_config->getInt(sec, kp->key, &v) == M64ERR_SUCCESS)
+        m_globalInt[id] = v;
+    }
+    for (const PerGameKey* kp = kPerGameStringKeys; kp->key; ++kp) {
+      m64p_handle sec = nullptr;
+      char buf[512] = {0};
+      int len = sizeof(buf);
+      std::string id = std::string(kp->section) + "|" + kp->key;
+      if (m_config->openSection(kp->section, &sec) == M64ERR_SUCCESS &&
+          m_config->getString(sec, kp->key, buf, &len) == M64ERR_SUCCESS)
+        m_globalStr[id] = buf;
+    }
+  }
+
+  void restoreGlobalDefaults() {
+    for (const PerGameKey* kp = kPerGameKeys; kp->key; ++kp) {
+      m64p_handle sec = nullptr;
+      std::string id = std::string(kp->section) + "|" + kp->key;
+      auto it = m_globalInt.find(id);
+      if (it != m_globalInt.end() &&
+          m_config->openSection(kp->section, &sec) == M64ERR_SUCCESS)
+        m_config->setInt(sec, kp->key, it->second);
+    }
+    for (const PerGameKey* kp = kPerGameStringKeys; kp->key; ++kp) {
+      m64p_handle sec = nullptr;
+      std::string id = std::string(kp->section) + "|" + kp->key;
+      auto it = m_globalStr.find(id);
+      if (it != m_globalStr.end() &&
+          m_config->openSection(kp->section, &sec) == M64ERR_SUCCESS)
+        m_config->setString(sec, kp->key, it->second.c_str());
+    }
+  }
+
+  // Every UI-settable setting the per-game save snapshots into [<MD5>] and
+  // applyPerGameSettings restores at launch for that ROM only. All other
+  // sections stay global.
+  struct PerGameKey {
+    const char* section;
+    const char* key;
+  };
+  static const PerGameKey kPerGameKeys[];
+  static const PerGameKey kPerGameStringKeys[];
+
   bool saveSettingsPerGame() override {
     if (m_romMd5.empty()) return false;
-    // Copy the exposed core settings into [<MD5>] as per-game overrides.
-    static const char* kPerGameKeys[] = {"R4300Emulator", "DisableExtraMem",
-                                         "CountPerOp", "SiDmaDuration",
-                                         "RandomizeInterrupt"};
-    m64p_handle core = nullptr, game = nullptr;
-    if (m_config->openSection("Core", &core) != M64ERR_SUCCESS) return false;
+    m64p_handle game = nullptr;
     if (m_config->openSection(m_romMd5.c_str(), &game) != M64ERR_SUCCESS)
       return false;
-    for (const char* key : kPerGameKeys) {
+    for (const PerGameKey* kp = kPerGameKeys; kp->key; ++kp) { const PerGameKey& k = *kp;
+      m64p_handle sec = nullptr;
       int v = 0;
-      if (m_config->getInt(core, key, &v) == M64ERR_SUCCESS)
-        m_config->setInt(game, key, v);
+      if (m_config->openSection(k.section, &sec) == M64ERR_SUCCESS &&
+          m_config->getInt(sec, k.key, &v) == M64ERR_SUCCESS)
+        m_config->setInt(game, k.key, v);
     }
+    for (const PerGameKey* kp = kPerGameStringKeys; kp->key; ++kp) { const PerGameKey& k = *kp;
+      m64p_handle sec = nullptr;
+      char buf[512] = {0};
+      int len = sizeof(buf);
+      if (m_config->openSection(k.section, &sec) == M64ERR_SUCCESS &&
+          m_config->getString(sec, k.key, buf, &len) == M64ERR_SUCCESS)
+        m_config->setString(game, k.key, buf);
+    }
+    // The session edited the GLOBAL sections live; revert them to the
+    // startup values so only this ROM gets the settings. In-memory stays as
+    // edited (the running game keeps them); the file carries the revert.
+    restoreGlobalDefaults();
     m_config->saveFile();
     return true;
   }
@@ -468,16 +567,23 @@ class EmulatorImpl : public Emulator {
   // Game") onto the [Core] section before the ROM runs.
   void applyPerGameSettings() {
     if (m_romMd5.empty()) return;
-    m64p_handle game = nullptr, core = nullptr;
+    m64p_handle game = nullptr;
     if (m_config->openSection(m_romMd5.c_str(), &game) != M64ERR_SUCCESS) return;
-    if (m_config->openSection("Core", &core) != M64ERR_SUCCESS) return;
-    static const char* kPerGameKeys[] = {"R4300Emulator", "DisableExtraMem",
-                                         "CountPerOp", "SiDmaDuration",
-                                         "RandomizeInterrupt"};
-    for (const char* key : kPerGameKeys) {
+    for (const PerGameKey* kp = kPerGameKeys; kp->key; ++kp) { const PerGameKey& k = *kp;
+      // Restore only when a per-game value was saved for this ROM.
+      m64p_handle sec = nullptr;
       int v = 0;
-      if (m_config->getInt(game, key, &v) == M64ERR_SUCCESS)
-        m_config->setInt(core, key, v);
+      if (m_config->getInt(game, k.key, &v) == M64ERR_SUCCESS &&
+          m_config->openSection(k.section, &sec) == M64ERR_SUCCESS)
+        m_config->setInt(sec, k.key, v);
+    }
+    for (const PerGameKey* kp = kPerGameStringKeys; kp->key; ++kp) { const PerGameKey& k = *kp;
+      m64p_handle sec = nullptr;
+      char buf[512] = {0};
+      int len = sizeof(buf);
+      if (m_config->getString(game, k.key, buf, &len) == M64ERR_SUCCESS &&
+          m_config->openSection(k.section, &sec) == M64ERR_SUCCESS)
+        m_config->setString(sec, k.key, buf);
     }
     LOG_INFO("applied per-game settings (%s)", m_romMd5.c_str());
   }
@@ -528,5 +634,44 @@ class EmulatorImpl : public Emulator {
 Emulator* Emulator::create() { return new EmulatorImpl(); }
 volatile int EmulatorImpl::g_stateComplete = 0;
 volatile int EmulatorImpl::g_gameStarted = 0;
+
+// Numeric per-game settings (core emulation + video/audio options).
+const EmulatorImpl::PerGameKey EmulatorImpl::kPerGameKeys[] = {
+    {"Core", "R4300Emulator"},
+    {"Core", "DisableExtraMem"},
+    {"Core", "CountPerOp"},
+    {"Core", "SiDmaDuration"},
+    {"Core", "RandomizeInterrupt"},
+    {"Video-General", "VerticalSync"},
+    {"Video-Glide64mk2", "wrpResolution"},
+    {"Audio-SDL", "DEFAULT_FREQUENCY"},
+    {"Audio-SDL", "SWAP_CHANNELS"},
+    {nullptr, nullptr},
+};
+
+// String per-game settings (input bindings; the input-sdl plugin's live
+// bindings are read at plugin start, so these apply from the next launch).
+const EmulatorImpl::PerGameKey EmulatorImpl::kPerGameStringKeys[] = {
+    {"Audio-SDL", "RESAMPLE"},
+    {"Input-SDL-Control1", "A Button"},
+    {"Input-SDL-Control1", "B Button"},
+    {"Input-SDL-Control1", "Start"},
+    {"Input-SDL-Control1", "Z Trig"},
+    {"Input-SDL-Control1", "DPad U"},
+    {"Input-SDL-Control1", "DPad D"},
+    {"Input-SDL-Control1", "DPad L"},
+    {"Input-SDL-Control1", "DPad R"},
+    {"Input-SDL-Control1", "C Button U"},
+    {"Input-SDL-Control1", "C Button D"},
+    {"Input-SDL-Control1", "C Button L"},
+    {"Input-SDL-Control1", "C Button R"},
+    {"Input-SDL-Control1", "L Trig"},
+    {"Input-SDL-Control1", "R Trig"},
+    {"Input-SDL-Control1", "X Axis"},
+    {"Input-SDL-Control1", "Y Axis"},
+    {"Input-SDL-Control1", "Mempak switch"},
+    {"Input-SDL-Control1", "Rumblepak switch"},
+    {nullptr, nullptr},
+};
 
 }  // namespace n64ui
