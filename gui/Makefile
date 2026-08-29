@@ -46,13 +46,18 @@ dist/obj/%.o: src/%.cpp
 	$(CXX) $(CFLAGS) $(INC) -c -o $@ $<
 
 # ---- device build via docker toolchain --------------------------------------
+# 'release' builds entirely inside a container; 'local' runs make on the host
+# with the image's g++ routed through scripts/toolchain wrappers, so only
+# changed files recompile and object files stay on the host.
 release:
 	bash scripts/build-docker.sh
 
-# ---- device build, direct WSL cross-compile (fast iteration) -----------------
-local: clean
-	$(MAKE) -j2 all CROSS_COMPILE=/home/aradhya/toolchains/gcc16-aarch64/bin/aarch64-linux-gnu- \
-	        SYSROOT=/home/aradhya/trimui-sysroot
+TOOLCHAIN_DIR = scripts/toolchain
+
+# Incremental: only changed files recompile (use 'make clean' to start over).
+local:
+	$(MAKE) -j2 all CROSS_COMPILE=$(abspath $(TOOLCHAIN_DIR))/aarch64-linux-gnu- \
+	        SYSROOT=/usr/aarch64-linux-gnu
 
 # ---- native host (WSL) dev build --------------------------------------------
 HOST_CXX ?= g++

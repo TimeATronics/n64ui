@@ -136,20 +136,41 @@ std::string SlotMenu::slotName(int i) const {
   return strFormat("Slot %d", i);
 }
 std::string SlotMenu::slotInfo(int slot) const {
-  // The core names files <goodname>-<md5>.st<N>; scan the save dir for any
-  // *.st<N> (whatever the goodname) and show the newest mtime.
+  // The core names files <goodname>[:32]-<MD5>[:8].st<N> (format 1) or
+  // <headername>.st<N> (format 0). Only show slots for the CURRENT ROM.
   const std::string suffix = strFormat(".st%d", slot);
+  const std::string base = emu().saveBase();
+  const std::string hdr = emu().romName();
   const std::string dir = emu().saveDir();
   struct dirent* e;
   DIR* d = opendir(dir.c_str());
   if (!d) return "(empty)";
   time_t best = 0;
   while ((e = readdir(d)) != nullptr) {
-    if (strstr(e->d_name, suffix.c_str()) == nullptr) continue;
     size_t len = strlen(e->d_name);
     if (len < suffix.size() ||
         strcmp(e->d_name + len - suffix.size(), suffix.c_str()) != 0)
       continue;
+    // Per-game filter: format-1 files carry "-<MD5>[:8]" before .st<N>;
+    // format-0 files start with the ROM header name. Match case-insensitively.
+    bool ours = false;
+    if (!base.empty() && len >= base.size() + suffix.size()) {
+      std::string pre = std::string(e->d_name).substr(0, base.size());
+      for (size_t i = 0; i < pre.size(); ++i)
+        pre[i] = (char)tolower((unsigned char)pre[i]);
+      std::string lbase = base;
+      for (char& c : lbase) c = (char)tolower((unsigned char)c);
+      if (pre == lbase) ours = true;
+    }
+    if (!ours && !hdr.empty()) {
+      std::string pre = std::string(e->d_name).substr(0, hdr.size());
+      for (size_t i = 0; i < pre.size(); ++i)
+        pre[i] = (char)tolower((unsigned char)pre[i]);
+      std::string lhdr = hdr;
+      for (char& c : lhdr) c = (char)tolower((unsigned char)c);
+      if (pre == lhdr) ours = true;
+    }
+    if (!ours) continue;
     struct stat st;
     std::string path = dir + "/" + e->d_name;
     if (stat(path.c_str(), &st) == 0 && st.st_mtime > best)

@@ -97,6 +97,10 @@ class Emulator {
   // Current ROM header name (from M64CMD_ROM_GET_HEADER), empty when idle.
   virtual const std::string& romName() const = 0;
 
+  // The core's savestate/SRAM file base for the current ROM
+  // ("<rom filename>[:32]-<MD5>[:8]"), for per-game slot filtering.
+  virtual const std::string& saveBase() const = 0;
+
   static Emulator* create();
 };
 

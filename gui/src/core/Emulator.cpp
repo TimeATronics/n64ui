@@ -265,6 +265,25 @@ class EmulatorImpl : public Emulator {
     }
     m_romMd5 = md5Hex(m_rom);
     applyPerGameSettings();
+    // The core names save files "<goodname>[:32]-<MD5>[:8].st<N>" (or just
+    // the header name with SaveFilenameFormat=0). Build the format-1 base so
+    // the slot lists can filter to this ROM only.
+    {
+      std::string base = romPath;
+      size_t slash = base.find_last_of('/');
+      if (slash != std::string::npos) base = base.substr(slash + 1);
+      size_t dot = base.find_last_of('.');
+      if (dot != std::string::npos) base = base.substr(0, dot);
+      for (size_t i = 0; i < base.size(); ++i) {
+        char ch = base[i];
+        if (ch == ':' || ch == '<' || ch == '>' || ch == '"' || ch == '/' ||
+            ch == '\\' || ch == '|' || ch == '?' || ch == '*')
+          base[i] = '_';
+      }
+      std::string md5u = m_romMd5;
+      for (char& c : md5u) c = (char)toupper((unsigned char)c);
+      m_saveBase = base.substr(0, 32) + "-" + md5u.substr(0, 8);
+    }
     m64p_error r = m_core->doCommand(M64CMD_ROM_OPEN, (int)m_rom.size(), m_rom.data());
     if (r != M64ERR_SUCCESS) {
       LOG_ERROR("ROM_OPEN: %s", m_core->errorMessage(r));
@@ -544,6 +563,10 @@ class EmulatorImpl : public Emulator {
 
   const std::string& romName() const override { return m_romName; }
 
+  // "<rom filename>[:32]-<MD5>[:8]" - the core's savestate/SRAM file base
+  // (SaveFilenameFormat=1). Used to filter the slot lists to this ROM.
+  const std::string& saveBase() const override { return m_saveBase; }
+
  private:
   // Core state callback (runs on the emulation thread). The core fires
   // SAVECOMPLETE/LOADCOMPLETE with 1 on success, 0 on failure.
@@ -626,6 +649,7 @@ class EmulatorImpl : public Emulator {
   std::vector<unsigned char> m_rom;
   std::string m_romName;
   std::string m_romMd5;
+  std::string m_saveBase;
   bool m_running = false;
   static volatile int g_stateComplete;
   static volatile int g_gameStarted;
