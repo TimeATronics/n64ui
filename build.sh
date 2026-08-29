@@ -80,7 +80,7 @@ release() {
 release-clean() {
   # Reverse applied source patches (only when they are applied).
   if [ -d "$RICE_DIR" ]; then
-    if ( cd "$RICE_DIR" && git apply --reverse --check "$RICE_PATCH" ); then
+    if ( cd "$RICE_DIR" && git apply --reverse --check "$RICE_PATCH" 2>/dev/null ); then
       echo "reversing $RICE_PATCH"
       ( cd "$RICE_DIR" && git apply -R "$RICE_PATCH" )
     else
